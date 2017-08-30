@@ -41,18 +41,18 @@ ledPlaying = 11
 GPIO.setmode(GPIO.BOARD)
 GPIO.setwarnings(False)
 
-GPIO.setup(IN1,GPIO.IN)
-GPIO.setup(IN2,GPIO.IN)
-GPIO.setup(IN3,GPIO.IN)
-GPIO.setup(IN4,GPIO.IN)
-GPIO.setup(IN5,GPIO.IN)
-GPIO.setup(IN6,GPIO.IN)
-GPIO.setup(IN7,GPIO.IN)
-GPIO.setup(IN8,GPIO.IN)
+GPIO.setup(IN1,GPIO.IN,pull_up_down=GPIO.PUD_UP)
+GPIO.setup(IN2,GPIO.IN,pull_up_down=GPIO.PUD_UP)
+GPIO.setup(IN3,GPIO.IN,pull_up_down=GPIO.PUD_UP)
+GPIO.setup(IN4,GPIO.IN,pull_up_down=GPIO.PUD_UP)
+GPIO.setup(IN5,GPIO.IN,pull_up_down=GPIO.PUD_UP)
+GPIO.setup(IN6,GPIO.IN,pull_up_down=GPIO.PUD_UP)
+GPIO.setup(IN7,GPIO.IN,pull_up_down=GPIO.PUD_UP)
+GPIO.setup(IN8,GPIO.IN,pull_up_down=GPIO.PUD_UP)
         
-GPIO.setup(START,GPIO.IN)
-GPIO.setup(STOP,GPIO.IN)
-GPIO.setup(UNMOUNT,GPIO.IN, pull_up_down=GPIO.PUD_UP)
+GPIO.setup(START,GPIO.IN,pull_up_down=GPIO.PUD_UP)
+GPIO.setup(STOP,GPIO.IN,pull_up_down=GPIO.PUD_UP)
+GPIO.setup(UNMOUNT,GPIO.IN,pull_up_down=GPIO.PUD_UP)
 
 GPIO.setup(ledDriveMounted,GPIO.OUT)
 GPIO.setup(ledReady,GPIO.OUT)
@@ -201,13 +201,18 @@ def GetPlayerStatus(PLAYING):
 def Play(FILE):
     strFILE = str(FILE)
 
-    for file in os.listdir(folderMedia):        
-        if file.endswith(strFILE):
-            strFile = folderMedia + "/" + file
-            print ("Loading and playing " + strFile)
-            pygame.mixer.music.load(strFile)
-            pygame.mixer.music.play()
-            GetPlayerStatus(PLAYING)
+    if (PLAYING == False) or ((PLAYING == True) and (INTERRUPT == True)):
+        for file in os.listdir(folderMedia):        
+            if file.endswith(strFILE):
+                strFile = folderMedia + "/" + file
+                print ("Loading and playing " + strFile)
+
+                if (PLAYING == True) and (INTERRUPT == True):
+                    pygame.mixer.music.stop()
+
+                pygame.mixer.music.load(strFile)
+                pygame.mixer.music.play()
+                GetPlayerStatus(PLAYING)
 
 #################################################################################
 # Read inputs.                                                                  #
@@ -276,74 +281,23 @@ def ReadInputs(MODE, NEXT_FILE):
 #################################################################################
 # Receive UDP                                                                    #
 #################################################################################
-def do_some_stuffs_with_input(input_string):  
-    return input_string[::-1]
-
-def client_thread(conn, ip, port, MAX_BUFFER_SIZE = 4096):
-
-    # the input is in bytes, so decode it
-    input_from_client_bytes = conn.recv(MAX_BUFFER_SIZE)
-
-    # MAX_BUFFER_SIZE is how big the message can be
-    # this is test if it's sufficiently big
-    import sys
-    siz = sys.getsizeof(input_from_client_bytes)
-    if  siz >= MAX_BUFFER_SIZE:
-        print("The length of input is probably too long: {}".format(siz))
-
-    # decode input and strip the end of line
-    input_from_client = input_from_client_bytes.decode("utf8").rstrip()
-
-    res = do_some_stuffs_with_input(input_from_client)
-    print("Result of processing {} is: {}".format(input_from_client, res))
-
-    vysl = res.encode("utf8")  # encode the result string
-    conn.sendall(vysl)  # send it to client
-    conn.close()  # close connection
-    print('Connection ' + ip + ':' + port + " ended")
-
-def start_server():
-
-    import socket
-    soc = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    # this is for easy starting/killing the app
-    soc.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    print('Socket created')
-
-    try:
-        soc.bind(("", 12345))
-        print('Socket bind complete')
-    except socket.error as msg:
-        import sys
-        print('Bind failed. Error : ' + str(sys.exc_info()))
-        sys.exit()
-
-    #Start listening on socket
-    soc.listen(10)
-    print('Socket now listening')
-
-    # for handling task in separate jobs we need threading
-    from threading import Thread
-
-    # this will make an infinite loop needed for 
-    # not reseting server for every client
+def recv_udp():
     while True:
-        conn, addr = soc.accept()
-        ip, port = str(addr[0]), str(addr[1])
-        print('Accepting connection from ' + ip + ':' + port)
-        try:
-            Thread(target=client_thread, args=(conn, ip, port)).start()
-        except:
-            print("Terible error!")
-            import traceback
-            traceback.print_exc()
-    soc.close()
+        UDP_FILE, addr = sock.recvfrom(1024)
+        UDP_FILE = str(UDP_FILE)
+        UDP_FILE = UDP_FILE.replace("b'", "")
+        UDP_FILE = UDP_FILE.replace("'", "")
+        UDP_FILE = int(UDP_FILE)
+        Play(UDP_FILE)
+
 
 #################################################################################
 # Stop file.                                                                    #
 #################################################################################
 def Stop():
+    
     pygame.mixer.music.stop()
+
 
 #################################################################################
 # Turn an I/O point on or off.                                                  #
@@ -362,19 +316,27 @@ def toggle(IO, Tag, State):
 # Main Loop                                                                     #
 #################################################################################
 try:
-    thread_udp = threading.Thread(name='test', target=start_server)
+    # Initialize and start UDP.
+    UDP_PORT = 1111
+    UDP_IP = ""
+    UDP_FILE = 0
+
+    sock = socket.socket(socket.AF_INET,
+                         socket.SOCK_DGRAM)
+
+    sock.bind((UDP_IP, UDP_PORT))
+
+    thread_udp = threading.Thread(name='UDP', target=recv_udp)
     thread_udp.start()
 
     while True:
         USB_Mounted=CheckUSB(USB_Mounted)
         READY = CheckConfig(USB_Mounted, READY)
-
+        PLAYING = GetPlayerStatus(PLAYING)
+        
         if (READY == True):
-            PLAYING = GetPlayerStatus(PLAYING)
-
             if (PLAYING == False) or ((PLAYING == True) and (INTERRUPT == True)):
                 FILE = ReadInputs(MODE, NEXT_FILE)
-
 
             if ((PLAYING == True) and ((GPIO.input(STOP) == ON) or (GPIO.input(UNMOUNT) == ON))):
                 Stop()
